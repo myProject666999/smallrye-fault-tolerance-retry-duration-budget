@@ -19,4 +19,17 @@ public class ThreadSleepDelay implements SyncDelay {
             Thread.sleep(delay);
         }
     }
+
+    @Override
+    public long getDelayInMillis(Throwable cause) {
+        // a negative delay (e.g. initial exponential delay with negative jitter) is treated as 0
+        return Math.max(0, backOff.getInMillis(cause));
+    }
+
+    @Override
+    public void sleep(Throwable cause, long delayInMillis) throws InterruptedException {
+        if (delayInMillis > 0) {
+            Thread.sleep(delayInMillis);
+        }
+    }
 }

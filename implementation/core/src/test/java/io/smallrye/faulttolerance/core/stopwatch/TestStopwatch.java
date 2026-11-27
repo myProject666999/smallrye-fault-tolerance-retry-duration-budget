@@ -7,6 +7,10 @@ public class TestStopwatch implements Stopwatch {
         this.currentValue = currentValue;
     }
 
+    public long getCurrentValue() {
+        return currentValue;
+    }
+
     @Override
     public RunningStopwatch start() {
         return new RunningStopwatch() {

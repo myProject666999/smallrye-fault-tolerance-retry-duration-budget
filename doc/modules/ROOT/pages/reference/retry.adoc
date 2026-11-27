@@ -50,6 +50,8 @@ Default: `180_000 millis`, or 3 minutes
 
 The maximum duration for which retries will be attempted.
 
+When the delay before a next retry attempt would reach or exceed the remaining duration, that wait (and the following attempt) is not performed at all: the retry loop ends immediately with the last failure. A delay that is exactly equal to the remaining duration is also considered overshooting, consistent with the inclusive duration comparison. A value of `0` means that the total duration of retries is unlimited.
+
 :time-value-name: maxDuration
 :time-unit-bad-name: durationUnit
 :time-unit-good-name: maxDurationUnit

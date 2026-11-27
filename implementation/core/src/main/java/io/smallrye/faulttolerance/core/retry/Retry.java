@@ -78,12 +78,28 @@ public class Retry<V> implements FaultToleranceStrategy<V> {
             if (state.attempt == 0) {
                 return retryLoopIteration(ctx, stopwatch, state);
             } else if (state.attempt <= maxRetries) {
-                if (stopwatch.elapsedTimeInMillis() >= maxTotalDurationInMillis) {
-                    ctx.fireEvent(RetryEvents.Finished.MAX_DURATION_REACHED);
-                    if (state.lastFailure != null) {
-                        return Future.ofError(state.lastFailure);
-                    } else {
-                        return Future.ofError(new FaultToleranceException(description + " reached max retry duration"));
+                long elapsedTimeInMillis = stopwatch.elapsedTimeInMillis();
+                if (elapsedTimeInMillis >= maxTotalDurationInMillis) {
+                    return maxDurationReached(ctx, state);
+                }
+
+                // The delay is computed at most once. If it is known up front, the exact same
+                // value is used both for the budget check below and for the actual wait.
+                // Delays that cannot be known before waiting (UNKNOWN_DELAY) keep the legacy
+                // "wait first, check afterwards" behavior.
+                long nextDelayInMillis = delay.getDelayInMillis(state.lastFailure);
+                if (nextDelayInMillis != AsyncDelay.UNKNOWN_DELAY) {
+                    if (nextDelayInMillis < 0) {
+                        nextDelayInMillis = 0;
+                    }
+                    long remainingTimeInMillis = maxTotalDurationInMillis - elapsedTimeInMillis;
+                    // a delay exactly equal to the remaining time is considered overshooting,
+                    // consistent with the `>=` comparison used elsewhere
+                    if (nextDelayInMillis >= remainingTimeInMillis) {
+                        LOG.debugf("%s not retrying: next delay %d ms would reach or exceed"
+                                + " remaining max duration %d ms",
+                                description, nextDelayInMillis, remainingTimeInMillis);
+                        return maxDurationReached(ctx, state);
                     }
                 }
 
@@ -93,9 +109,12 @@ public class Retry<V> implements FaultToleranceStrategy<V> {
                 Completer<State<V>> result = Completer.create();
 
                 try {
-                    delay.after(state.lastFailure, () -> {
-                        retryLoopIteration(ctx, stopwatch, state).thenComplete(result);
-                    }, ctx.get(Executor.class));
+                    Runnable retryTask = () -> retryLoopIteration(ctx, stopwatch, state).thenComplete(result);
+                    if (nextDelayInMillis == AsyncDelay.UNKNOWN_DELAY) {
+                        delay.after(state.lastFailure, retryTask, ctx.get(Executor.class));
+                    } else {
+                        delay.after(state.lastFailure, retryTask, ctx.get(Executor.class), nextDelayInMillis);
+                    }
                 } catch (Exception e) {
                     if (ctx.isSync() && Thread.interrupted()) {
                         result.completeWithError(new InterruptedException());
@@ -124,6 +143,15 @@ public class Retry<V> implements FaultToleranceStrategy<V> {
             }
         });
         return completer.future();
+    }
+
+    private Future<State<V>> maxDurationReached(FaultToleranceContext<V> ctx, State<V> state) {
+        ctx.fireEvent(RetryEvents.Finished.MAX_DURATION_REACHED);
+        if (state.lastFailure != null) {
+            return Future.ofError(state.lastFailure);
+        } else {
+            return Future.ofError(new FaultToleranceException(description + " reached max retry duration"));
+        }
     }
 
     private Future<State<V>> retryLoopIteration(FaultToleranceContext<V> ctx, RunningStopwatch stopwatch, State<V> state) {

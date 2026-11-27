@@ -26,4 +26,19 @@ final class SyncDelayAsAsync implements AsyncDelay {
         }
         task.run();
     }
+
+    @Override
+    public long getDelayInMillis(Throwable cause) {
+        return delegate.getDelayInMillis(cause);
+    }
+
+    @Override
+    public void after(Throwable cause, Runnable task, Executor executor, long delayInMillis) {
+        try {
+            delegate.sleep(cause, delayInMillis);
+        } catch (InterruptedException e) {
+            throw sneakyThrow(e);
+        }
+        task.run();
+    }
 }
